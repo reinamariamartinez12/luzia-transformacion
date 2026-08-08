@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi Luzia — Acceso</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Cormorant+Garamond:ital,wght@0,500;1,500;1,600&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '767542639288249');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Meta Pixel Code -->
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<style>
+  :root{
+    --cream:#F7F1E8;
+    --ink:#3A2E26;
+    --gold:#B08D57;
+    --night:#2A2128;
+    --line:rgba(58,46,38,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--night);
+    color:#F1E9DC;
+    font-family:'Montserrat',sans-serif;
+    font-size:16px;
+    line-height:1.6;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+  }
+  h1,h2{font-family:'Playfair Display',serif; color:#F1E9DC;}
+  em, .mirror{font-family:'Cormorant Garamond',serif; font-style:italic;}
+
+  .card{
+    max-width:420px;
+    width:100%;
+    text-align:center;
+    position:relative;
+  }
+  .card::before{
+    content:'';
+    position:fixed; inset:0;
+    background:radial-gradient(circle at 50% 0%, rgba(176,141,87,.18), transparent 60%);
+    pointer-events:none;
+    z-index:-1;
+  }
+  .luzia-logo{
+    width:88px; height:88px;
+    border-radius:50%;
+    margin:0 auto 20px;
+    box-shadow:0 10px 26px rgba(176,141,87,.3);
+    background:var(--gold);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Playfair Display',serif;
+    font-size:34px;
+    color:#fff;
+  }
+  h1{font-size:clamp(22px,6vw,28px); margin-bottom:12px; font-weight:600;}
+  .subtitle{opacity:.75; font-size:15px; margin-bottom:28px;}
+
+  input[type=email]{
+    width:100%;
+    padding:15px 18px;
+    border-radius:100px;
+    border:1px solid rgba(241,233,220,.25);
+    background:rgba(241,233,220,.06);
+    color:#F1E9DC;
+    font-family:'Montserrat',sans-serif;
+    font-size:15px;
+    margin-bottom:14px;
+    outline:none;
+  }
+  input[type=email]::placeholder{color:rgba(241,233,220,.45);}
+  input[type=email]:focus{border-color:var(--gold);}
+
+  .btn{
+    display:inline-block;
+    width:100%;
+    padding:16px 20px;
+    border-radius:100px;
+    font-family:'Montserrat',sans-serif;
+    font-weight:600;
+    font-size:15px;
+    text-decoration:none;
+    border:none;
+    cursor:pointer;
+    transition:transform .18s ease, box-shadow .18s ease;
+    background:var(--gold);
+    color:#fff;
+    box-shadow:0 10px 24px rgba(176,141,87,.35);
+  }
+  .btn:hover{transform:translateY(-2px);}
+  .btn:disabled{opacity:.6; cursor:default; transform:none;}
+  .btn-outline{
+    background:transparent;
+    border:1px solid rgba(241,233,220,.3);
+    box-shadow:none;
+    color:#F1E9DC;
+    margin-top:12px;
+  }
+
+  .msg{font-size:14px; margin-top:16px; opacity:.85;}
+  .msg.error{color:#E8A87C;}
+  .msg.success{color:#9FD9A0;}
+
+  .disclaimer{font-size:12px; opacity:.5; margin-top:24px;}
+
+  .hidden{display:none !important;}
+
+  .spinner{
+    display:inline-block; width:16px; height:16px;
+    border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff;
+    border-radius:50%;
+    animation:spin .7s linear infinite;
+    margin-right:8px; vertical-align:middle;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- PANTALLA 1: pedir email -->
+  <div id="screen-email">
+    <div class="luzia-logo">L</div>
+    <h1>Tu espacio, <span class="mirror">solo tuyo</span></h1>
+    <p class="subtitle">Escribe el correo con el que compraste Luzia y te mandamos un link de acceso.</p>
+    <input type="email" id="email-input" placeholder="tu@correo.com" autocomplete="email">
+    <button class="btn" id="btn-send-link">Enviar mi link de acceso</button>
+    <p class="msg" id="email-msg"></p>
+    <p class="disclaimer">Luzia no reemplaza la atención psicológica profesional.</p>
+  </div>
+
+  <!-- PANTALLA 2: revisa tu correo -->
+  <div id="screen-sent" class="hidden">
+    <div class="luzia-logo">✉</div>
+    <h1>Revisa tu <span class="mirror">correo</span></h1>
+    <p class="subtitle">Te mandamos un link mágico. Ábrelo desde este mismo dispositivo para entrar.</p>
+    <button class="btn btn-outline" id="btn-back">Usar otro correo</button>
+  </div>
+
+  <!-- PANTALLA 3: verificando acceso -->
+  <div id="screen-checking" class="hidden">
+    <div class="luzia-logo">L</div>
+    <h1>Verificando tu <span class="mirror">acceso</span></h1>
+    <p class="subtitle"><span class="spinner"></span>Un momento...</p>
+  </div>
+
+  <!-- PANTALLA 4: acceso concedido -->
+  <div id="screen-active" class="hidden">
+    <div class="luzia-logo">L</div>
+    <h1>Bienvenida de <span class="mirror">vuelta</span></h1>
+    <p class="subtitle">Tu suscripción está activa. Este es tu espacio con Luzia.</p>
+    <a class="btn" id="link-to-gpt" href="#" target="_blank">Entrar a mi Luzia</a>
+  </div>
+
+  <!-- PANTALLA 5: sin acceso -->
+  <div id="screen-inactive" class="hidden">
+    <div class="luzia-logo">L</div>
+    <h1>Tu suscripción no está <span class="mirror">activa</span></h1>
+    <p class="subtitle">No encontramos una suscripción activa con este correo. Si crees que es un error, escríbenos.</p>
+    <a class="btn" href="https://wa.me/573013429441?text=Hola%20Reina%2C%20tengo%20un%20problema%20con%20mi%20acceso%20a%20Luzia" target="_blank">Escribir por WhatsApp</a>
+  </div>
+
+</div>
+
+<script>
+  const SUPABASE_URL = "https://chserhjlgawfnpnlftou.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_-XDPx7hbwZToOwO35j_QCw_wBIyQV-g";
+  const LUZIA_GPT_URL = "https://chatgpt.com/g/g-68631b90db148191a55debdc24661236-luzia-tu-guia-emocional-diaria";
+
+  const { createClient } = supabase;
+  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const screens = {
+    email: document.getElementById('screen-email'),
+    sent: document.getElementById('screen-sent'),
+    checking: document.getElementById('screen-checking'),
+    active: document.getElementById('screen-active'),
+    inactive: document.getElementById('screen-inactive')
+  };
+
+  function showScreen(name) {
+    Object.values(screens).forEach(s => s.classList.add('hidden'));
+    screens[name].classList.remove('hidden');
+  }
+
+  const emailInput = document.getElementById('email-input');
+  const emailMsg = document.getElementById('email-msg');
+  const btnSend = document.getElementById('btn-send-link');
+
+  btnSend.addEventListener('click', async () => {
+    const email = emailInput.value.trim();
+    if (!email || !email.includes('@')) {
+      emailMsg.textContent = 'Escribe un correo válido.';
+      emailMsg.className = 'msg error';
+      return;
+    }
+    btnSend.disabled = true;
+    btnSend.textContent = 'Enviando...';
+
+    const { error } = await client.auth.signInWithOtp({
+      email: email,
+      options: { emailRedirectTo: window.location.href }
+    });
+
+    btnSend.disabled = false;
+    btnSend.textContent = 'Enviar mi link de acceso';
+
+    if (error) {
+      emailMsg.textContent = 'Hubo un error. Intenta de nuevo en un momento.';
+      emailMsg.className = 'msg error';
+      return;
+    }
+    showScreen('sent');
+  });
+
+  document.getElementById('btn-back').addEventListener('click', () => {
+    showScreen('email');
+  });
+
+  async function checkAccess(email) {
+    showScreen('checking');
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/luzia_subscribers?email=eq.${encodeURIComponent(email)}&select=estado`,
+      {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${(await client.auth.getSession()).data.session.access_token}`
+        }
+      }
+    );
+    const data = await res.json();
+    const activa = data.length > 0 && data[0].estado === 'activo';
+
+    if (activa) {
+      document.getElementById('link-to-gpt').href = LUZIA_GPT_URL;
+      showScreen('active');
+    } else {
+      showScreen('inactive');
+    }
+  }
+
+  // Al cargar la pagina, revisamos si ya hay sesion activa (volviendo del link magico)
+  client.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_IN' && session) {
+      checkAccess(session.user.email);
+    }
+  });
+
+  client.auth.getSession().then(({ data: { session } }) => {
+    if (session) {
+      checkAccess(session.user.email);
+    }
+  });
+</script>
+
+</body>
+</html>
