@@ -1,18 +1,56 @@
 // netlify/functions/hotmart-webhook.js
 // Webhook que recibe notificaciones de Hotmart y actualiza el acceso de suscriptoras de Luzia
+// Version sin librerias externas: usa fetch nativo para hablar con la API REST de Supabase
 
-const { createClient } = require('@supabase/supabase-js');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+function supabaseHeaders(extra = {}) {
+  return {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    ...extra
+  };
+}
+
+async function supabaseSelect(table, filterQuery) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filterQuery}`, {
+    headers: supabaseHeaders()
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.length > 0 ? data[0] : null;
+}
+
+async function supabaseInsert(table, row) {
+  return fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: supabaseHeaders({ Prefer: 'return=minimal' }),
+    body: JSON.stringify(row)
+  });
+}
+
+async function supabaseUpsert(table, row, conflictColumn) {
+  return fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${conflictColumn}`, {
+    method: 'POST',
+    headers: supabaseHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify(row)
+  });
+}
+
+async function supabaseUpdateByEmail(table, email, changes) {
+  return fetch(`${SUPABASE_URL}/rest/v1/${table}?email=eq.${encodeURIComponent(email)}`, {
+    method: 'PATCH',
+    headers: supabaseHeaders({ Prefer: 'return=minimal' }),
+    body: JSON.stringify(changes)
+  });
+}
 
 exports.handler = async (event) => {
-  // Solo aceptamos peticiones POST
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
-
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
 
   let payload;
   try {
@@ -21,15 +59,15 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
 
-  // 1. Verificar el Hottok (token secreto de Hotmart)
   const hottokRecibido = payload.hottok;
   const hottokEsperado = process.env.HOTMART_HOTTOK_LUZIA;
 
   if (!hottokRecibido || hottokRecibido !== hottokEsperado) {
-    await supabase.from('webhook_log').insert({
+    await supabaseInsert('webhook_log', {
       event_id: payload?.data?.purchase?.transaction || 'unknown',
       type: payload?.event || 'unknown',
-      result: 'unauthorized'
+      result: 'unauthorized',
+      received_at: new Date().toISOString()
     });
     return { statusCode: 401, body: 'Unauthorized' };
   }
@@ -37,32 +75,28 @@ exports.handler = async (event) => {
   const eventType = payload.event;
   const eventId = payload?.data?.purchase?.transaction || payload?.id || `${eventType}-${Date.now()}`;
 
-  // 2. Chequear si ya procesamos este evento antes (idempotencia)
-  const { data: existente } = await supabase
-    .from('processed_events')
-    .select('event_id')
-    .eq('event_id', eventId)
-    .maybeSingle();
+  const existente = await supabaseSelect('processed_events', `event_id=eq.${encodeURIComponent(eventId)}&select=event_id`);
 
   if (existente) {
-    await supabase.from('webhook_log').insert({
+    await supabaseInsert('webhook_log', {
       event_id: eventId,
       type: eventType,
-      result: 'duplicate'
+      result: 'duplicate',
+      received_at: new Date().toISOString()
     });
     return { statusCode: 200, body: 'Already processed' };
   }
 
-  // 3. Extraer datos del comprador
   const email = payload?.data?.buyer?.email;
   const transactionId = payload?.data?.purchase?.transaction;
   const subscriberCode = payload?.data?.subscription?.subscriber?.code || null;
 
   if (!email) {
-    await supabase.from('webhook_log').insert({
+    await supabaseInsert('webhook_log', {
       event_id: eventId,
       type: eventType,
-      result: 'no_user'
+      result: 'no_user',
+      received_at: new Date().toISOString()
     });
     return { statusCode: 200, body: 'No email in payload' };
   }
@@ -70,51 +104,52 @@ exports.handler = async (event) => {
   let resultado = 'applied';
 
   try {
-    // 4. Actualizar la tabla luzia_subscribers según el tipo de evento
     if (eventType === 'PURCHASE_APPROVED' || eventType === 'PURCHASE_COMPLETE') {
-      await supabase.from('luzia_subscribers').upsert({
+      await supabaseUpsert('luzia_subscribers', {
         email: email,
         estado: 'activo',
         hotmart_transaction_id: transactionId,
         hotmart_subscriber_code: subscriberCode,
         fecha_compra: new Date().toISOString(),
         fecha_activacion: new Date().toISOString()
-      }, { onConflict: 'email' });
+      }, 'email');
 
     } else if (eventType === 'PURCHASE_REFUNDED' || eventType === 'PURCHASE_CHARGEBACK') {
-      await supabase.from('luzia_subscribers')
-        .update({ estado: 'reembolsado', fecha_cancelacion: new Date().toISOString() })
-        .eq('email', email);
+      await supabaseUpdateByEmail('luzia_subscribers', email, {
+        estado: 'reembolsado',
+        fecha_cancelacion: new Date().toISOString()
+      });
 
     } else if (eventType === 'SUBSCRIPTION_CANCELLATION' || eventType === 'PURCHASE_CANCELED') {
-      await supabase.from('luzia_subscribers')
-        .update({ estado: 'cancelado', fecha_cancelacion: new Date().toISOString() })
-        .eq('email', email);
+      await supabaseUpdateByEmail('luzia_subscribers', email, {
+        estado: 'cancelado',
+        fecha_cancelacion: new Date().toISOString()
+      });
 
     } else {
-      resultado = 'illegal'; // evento que no manejamos, lo dejamos registrado igual
+      resultado = 'illegal';
     }
 
-    // 5. Marcar el evento como procesado (para idempotencia futura)
-    await supabase.from('processed_events').insert({
+    await supabaseInsert('processed_events', {
       event_id: eventId,
       event_type: eventType
     });
 
-    // 6. Dejar huella en el log
-    await supabase.from('webhook_log').insert({
+    await supabaseInsert('webhook_log', {
       event_id: eventId,
       type: eventType,
-      result: resultado
+      result: resultado,
+      received_at: new Date().toISOString()
     });
 
     return { statusCode: 200, body: 'OK' };
 
   } catch (err) {
-    await supabase.from('webhook_log').insert({
+    await supabaseInsert('webhook_log', {
       event_id: eventId,
       type: eventType,
-      result: 'error'
+      result: 'error',
+      received_at: new Date().toISOString()
     });
     return { statusCode: 500, body: 'Internal error' };
   }
