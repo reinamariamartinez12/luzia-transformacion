@@ -66,18 +66,11 @@ exports.handler = async (event) => {
   const hottokEsperado = process.env.HOTMART_HOTTOK_LUZIA;
 
   if (!hottokRecibido || hottokRecibido !== hottokEsperado) {
-    function pista(valor) {
-      if (valor === undefined) return 'undefined';
-      if (valor === null) return 'null';
-      if (valor.length === 0) return 'vacio';
-      return `len=${valor.length} inicio="${valor.slice(0, 3)}" fin="${valor.slice(-3)}"`;
-    }
     await supabaseInsert('webhook_log', {
       event_id: payload?.data?.purchase?.transaction || 'unknown',
       type: payload?.event || 'unknown',
       result: 'unauthorized',
-      received_at: new Date().toISOString(),
-      debug_info: `recibido[${pista(hottokRecibido)}] esperado[${pista(hottokEsperado)}] origen=${payload.hottok ? 'body' : (headers['x-hotmart-hottok'] || headers['hottok'] ? 'header' : 'ninguno')}`
+      received_at: new Date().toISOString()
     });
     return { statusCode: 401, body: 'Unauthorized' };
   }
