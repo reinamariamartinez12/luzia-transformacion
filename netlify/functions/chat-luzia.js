@@ -1,20 +1,27 @@
 // netlify/functions/chat-luzia.js
 // Recibe un mensaje de la usuaria, valida su suscripcion contra luzia_subscribers,
-// llama a OpenAI con la personalidad de Luzia, y guarda el intercambio en luzia_conversaciones.
+// llama a OpenAI con la personalidad de Luzia, guarda el intercambio en luzia_conversaciones,
+// y mantiene su perfil de personalizacion (nombre, racha, memoria de largo plazo, frase del dia).
 // Version sin librerias externas: usa fetch nativo (mismo patron que hotmart-webhook.js).
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 // Llave publica (publishable), la misma que ya viaja expuesta en mi-luzia.html.
 // No es secreta: identifica el proyecto, no otorga permisos por si sola.
 const SUPABASE_ANON_KEY = 'sb_publishable_-XDPx7hbwZToOwO35j_QCw_wBIyQV-g';
+// Llave de servicio: SOLO se usa server-side para escribir el perfil (nombre, racha, memoria).
+// El token de la usuaria no tiene permiso de escritura en luzia_subscribers a proposito
+// (para que nadie pueda cambiarse su propio estado de pago desde el navegador).
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const MENSAJES_DE_CONTEXTO = 20; // cuantos mensajes previos se mandan a la IA como memoria reciente
 const MAX_CARACTERES_MENSAJE = 4000;
+const UMBRAL_ACTUALIZAR_MEMORIA = 20; // cada cuantos mensajes nuevos se refresca memoria_resumen
+const CICLOS_ENTRE_RESUMEN_PERFIL = 3; // cada cuantas actualizaciones de memoria se le muestra el resumen a la usuaria
 
-const SYSTEM_PROMPT = `Eres Luzia. Un espacio emocional donde la usuaria puede decir lo que siente sin quedarse sola con eso. Escuchas, entiendes, acompañas y guías con claridad emocional y acciones prácticas para volver a ella misma. No eres solo conversación: eres acompañamiento real, humano y progresivo. No reemplazas terapia.
+const SYSTEM_PROMPT_BASE = `Eres Luzia. Un espacio emocional donde la usuaria puede decir lo que siente sin quedarse sola con eso. Escuchas, entiendes, acompañas y guías con claridad emocional y acciones prácticas para volver a ella misma. No eres solo conversación: eres acompañamiento real, humano y progresivo. No reemplazas terapia.
 
 PROPÓSITO. Ayudar a mujeres a: entender lo que sienten, dejar de sobrepensar, tomar decisiones desde el amor propio, dejar de abandonarse, construir una relación más sana consigo mismas.
 
@@ -90,6 +97,59 @@ function supabaseHeaders(userToken, extra = {}) {
   };
 }
 
+function supabaseHeadersService(extra = {}) {
+  return {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    'Content-Type': 'application/json',
+    ...extra
+  };
+}
+
+function hoyISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ayerISO() {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function calcularRacha(perfil) {
+  const hoy = hoyISO();
+  if (!perfil.ultima_interaccion) {
+    return { racha: 1, esDiaNuevo: true, hoy };
+  }
+  if (perfil.ultima_interaccion === hoy) {
+    return { racha: perfil.racha_dias || 1, esDiaNuevo: false, hoy };
+  }
+  if (perfil.ultima_interaccion === ayerISO()) {
+    return { racha: (perfil.racha_dias || 0) + 1, esDiaNuevo: true, hoy };
+  }
+  return { racha: 1, esDiaNuevo: true, hoy };
+}
+
+function construirSystemPrompt(perfil, esDiaNuevo) {
+  let prompt = SYSTEM_PROMPT_BASE;
+
+  if (perfil.nombre) {
+    prompt += `\n\nLa usuaria se llama ${perfil.nombre}. Puedes usar su nombre con naturalidad en la conversación, sin abusar (no hace falta decirlo en cada frase).`;
+  } else {
+    prompt += `\n\nTodavía no sabes el nombre de la usuaria. En algún momento natural de esta conversación (no como formulario, no necesariamente en la primera línea si no encaja), pregúntale cómo se llama.`;
+  }
+
+  if (perfil.memoria_resumen) {
+    prompt += `\n\nLO QUE YA SABES DE ELLA (de conversaciones anteriores — úsalo con naturalidad, nunca lo menciones como "según mis registros" ni de forma técnica):\n${perfil.memoria_resumen}`;
+  }
+
+  if (esDiaNuevo) {
+    prompt += `\n\nHoy es la primera vez que te escribe en el día. Antes de entrar de lleno al tema, empieza con una pregunta breve y cálida de cómo llega hoy (una frase corta), y luego sigue naturalmente con lo que te cuente.`;
+  }
+
+  return prompt;
+}
+
 async function obtenerUsuarioDesdeToken(userToken) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: supabaseHeaders(userToken)
@@ -99,14 +159,24 @@ async function obtenerUsuarioDesdeToken(userToken) {
   return data?.email ? data : null;
 }
 
-async function suscripcionActiva(email, userToken) {
+async function obtenerPerfil(email, userToken) {
+  const campos = 'estado,nombre,racha_dias,ultima_interaccion,memoria_resumen,mensajes_desde_resumen,resumen_actualizaciones,ultimo_resumen_mostrado,frase_del_dia,frase_fecha';
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/luzia_subscribers?email=eq.${encodeURIComponent(email)}&select=estado`,
+    `${SUPABASE_URL}/rest/v1/luzia_subscribers?email=eq.${encodeURIComponent(email)}&select=${campos}`,
     { headers: supabaseHeaders(userToken) }
   );
-  if (!res.ok) return false;
+  if (!res.ok) return null;
   const data = await res.json();
-  return data.length > 0 && data[0].estado === 'activo';
+  return data.length > 0 ? data[0] : null;
+}
+
+async function actualizarPerfil(email, cambios) {
+  if (Object.keys(cambios).length === 0) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/luzia_subscribers?email=eq.${encodeURIComponent(email)}`, {
+    method: 'PATCH',
+    headers: supabaseHeadersService({ Prefer: 'return=minimal' }),
+    body: JSON.stringify(cambios)
+  });
 }
 
 async function obtenerHistorialReciente(email, userToken) {
@@ -130,16 +200,7 @@ async function guardarIntercambio(email, mensajeUsuaria, mensajeLuzia, userToken
   });
 }
 
-async function preguntarleAOpenAI(historial, mensajeNuevo) {
-  const mensajes = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    ...historial.map((m) => ({
-      role: m.rol === 'usuaria' ? 'user' : 'assistant',
-      content: m.contenido
-    })),
-    { role: 'user', content: mensajeNuevo }
-  ];
-
+async function llamarOpenAI(mensajesChat, { temperature = 0.9, max_tokens = 700 } = {}) {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -148,9 +209,9 @@ async function preguntarleAOpenAI(historial, mensajeNuevo) {
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
-      messages: mensajes,
-      temperature: 0.9,
-      max_tokens: 700
+      messages: mensajesChat,
+      temperature,
+      max_tokens
     })
   });
 
@@ -160,7 +221,103 @@ async function preguntarleAOpenAI(historial, mensajeNuevo) {
   }
 
   const data = await res.json();
-  return data?.choices?.[0]?.message?.content?.trim();
+  return data?.choices?.[0]?.message?.content?.trim() || null;
+}
+
+async function preguntarleAOpenAI(systemPrompt, historial, mensajeNuevo) {
+  const mensajes = [
+    { role: 'system', content: systemPrompt },
+    ...historial.map((m) => ({
+      role: m.rol === 'usuaria' ? 'user' : 'assistant',
+      content: m.contenido
+    })),
+    { role: 'user', content: mensajeNuevo }
+  ];
+  return llamarOpenAI(mensajes, { temperature: 0.9, max_tokens: 700 });
+}
+
+async function extraerNombre(mensajeUsuaria) {
+  try {
+    const texto = await llamarOpenAI(
+      [
+        {
+          role: 'system',
+          content: 'Extraes el primer nombre de una persona si lo esta dando en su mensaje (ej: "me llamo Ana", "soy Fernanda", "Valentina"). Respondes UNICAMENTE el nombre propio, capitalizado, sin nada mas. Si el mensaje no contiene un nombre propio siendo presentado, respondes exactamente NINGUNO.'
+        },
+        { role: 'user', content: mensajeUsuaria }
+      ],
+      { temperature: 0, max_tokens: 10 }
+    );
+    if (!texto || texto.toUpperCase().includes('NINGUNO') || texto.length > 30) return null;
+    return texto;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function actualizarMemoria(memoriaActual, mensajesTranscripcion) {
+  try {
+    const transcripcion = mensajesTranscripcion
+      .map((m) => `${m.rol === 'usuaria' ? 'Usuaria' : 'Luzia'}: ${m.contenido}`)
+      .join('\n');
+    const texto = await llamarOpenAI(
+      [
+        {
+          role: 'system',
+          content: 'Actualizas un resumen breve (maximo 150 palabras) de patrones emocionales, temas recurrentes y avances de una usuaria, en tono calido y neutral, en tercera persona, para que otra IA lo use como memoria de largo plazo. Combina el resumen anterior con la informacion nueva del fragmento de conversacion. No inventes nada que no este en el texto.'
+        },
+        {
+          role: 'user',
+          content: `Resumen anterior:\n${memoriaActual || '(ninguno todavia)'}\n\nFragmento de conversación nuevo:\n${transcripcion}\n\nEscribe el resumen actualizado.`
+        }
+      ],
+      { temperature: 0.4, max_tokens: 250 }
+    );
+    return texto || memoriaActual;
+  } catch (err) {
+    return memoriaActual;
+  }
+}
+
+async function generarResumenPositivo(memoria) {
+  try {
+    return await llamarOpenAI(
+      [
+        {
+          role: 'system',
+          content: 'Escribes, en segunda persona y en tono calido (como Luzia), un resumen breve (3-4 frases) del proceso de una usuaria basado en el resumen de memoria que te paso. SIEMPRE en positivo: que le gusta, que ha superado, como ha avanzado. Nunca menciones lo que le falta, lo que sigue mal, ni des consejos nuevos. Es un regalo de reconocimiento, no un diagnostico.'
+        },
+        { role: 'user', content: memoria || '' }
+      ],
+      { temperature: 0.8, max_tokens: 200 }
+    );
+  } catch (err) {
+    return null;
+  }
+}
+
+async function generarFraseDelDia(memoria, mensajesRecientes) {
+  try {
+    const contexto = mensajesRecientes
+      .slice(-6)
+      .map((m) => `${m.rol === 'usuaria' ? 'Usuaria' : 'Luzia'}: ${m.contenido}`)
+      .join('\n');
+    return await llamarOpenAI(
+      [
+        {
+          role: 'system',
+          content: 'Escribes una sola frase corta (maximo 20 palabras), calida y especifica -no generica de banco de frases- como si Luzia se la regalara a esta usuaria en particular hoy, basada en como se ha sentido segun el contexto. Sin comillas, sin firma, solo la frase.'
+        },
+        {
+          role: 'user',
+          content: `Lo que sabes de ella:\n${memoria || '(poco todavia)'}\n\nÚltimos mensajes:\n${contexto || '(sin mensajes recientes)'}`
+        }
+      ],
+      { temperature: 0.9, max_tokens: 60 }
+    );
+  } catch (err) {
+    return null;
+  }
 }
 
 exports.handler = async (event) => {
@@ -195,16 +352,19 @@ exports.handler = async (event) => {
     return respuesta(401, { error: 'Tu sesion no es valida. Vuelve a iniciar sesion.' });
   }
 
-  const activa = await suscripcionActiva(usuario.email, userToken);
-  if (!activa) {
+  const perfil = await obtenerPerfil(usuario.email, userToken);
+  if (!perfil || perfil.estado !== 'activo') {
     return respuesta(403, {
       error: 'Tu suscripcion no esta activa. Si crees que es un error, escribenos por WhatsApp.'
     });
   }
 
+  const { racha, esDiaNuevo, hoy } = calcularRacha(perfil);
+
   try {
     const historial = await obtenerHistorialReciente(usuario.email, userToken);
-    const respuestaLuzia = await preguntarleAOpenAI(historial, mensaje);
+    const systemPrompt = construirSystemPrompt(perfil, esDiaNuevo);
+    const respuestaLuzia = await preguntarleAOpenAI(systemPrompt, historial, mensaje);
 
     if (!respuestaLuzia) {
       throw new Error('OpenAI no devolvio contenido');
@@ -212,7 +372,55 @@ exports.handler = async (event) => {
 
     await guardarIntercambio(usuario.email, mensaje, respuestaLuzia, userToken);
 
-    return respuesta(200, { respuesta: respuestaLuzia });
+    const cambiosPerfil = { racha_dias: racha, ultima_interaccion: hoy };
+    let resumenPerfilParaMostrar = null;
+    let fraseDelDia = perfil.frase_fecha === hoy ? perfil.frase_del_dia : null;
+
+    if (!perfil.nombre && historial.length > 0) {
+      const nombreDetectado = await extraerNombre(mensaje);
+      if (nombreDetectado) cambiosPerfil.nombre = nombreDetectado;
+    } else {
+      const totalNuevos = (perfil.mensajes_desde_resumen || 0) + 2;
+
+      if (totalNuevos >= UMBRAL_ACTUALIZAR_MEMORIA) {
+        const transcripcion = [...historial, { rol: 'usuaria', contenido: mensaje }, { rol: 'luzia', contenido: respuestaLuzia }];
+        const nuevaMemoria = await actualizarMemoria(perfil.memoria_resumen, transcripcion);
+        cambiosPerfil.memoria_resumen = nuevaMemoria;
+        cambiosPerfil.mensajes_desde_resumen = 0;
+
+        const nuevasActualizaciones = (perfil.resumen_actualizaciones || 0) + 1;
+        cambiosPerfil.resumen_actualizaciones = nuevasActualizaciones;
+
+        if (nuevasActualizaciones - (perfil.ultimo_resumen_mostrado || 0) >= CICLOS_ENTRE_RESUMEN_PERFIL) {
+          const positivo = await generarResumenPositivo(nuevaMemoria);
+          if (positivo) {
+            resumenPerfilParaMostrar = positivo;
+            cambiosPerfil.ultimo_resumen_mostrado = nuevasActualizaciones;
+          }
+        }
+      } else {
+        cambiosPerfil.mensajes_desde_resumen = totalNuevos;
+
+        if (perfil.frase_fecha !== hoy) {
+          const nuevaFrase = await generarFraseDelDia(perfil.memoria_resumen, historial);
+          if (nuevaFrase) {
+            cambiosPerfil.frase_del_dia = nuevaFrase;
+            cambiosPerfil.frase_fecha = hoy;
+            fraseDelDia = nuevaFrase;
+          }
+        }
+      }
+    }
+
+    await actualizarPerfil(usuario.email, cambiosPerfil);
+
+    return respuesta(200, {
+      respuesta: respuestaLuzia,
+      racha,
+      esDiaNuevo,
+      fraseDelDia,
+      resumenPerfil: resumenPerfilParaMostrar
+    });
   } catch (err) {
     return respuesta(500, {
       error: 'Luzia no pudo responder en este momento. Intenta de nuevo en un momento.'
