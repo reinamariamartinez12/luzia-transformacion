@@ -376,7 +376,7 @@ exports.handler = async (event) => {
     let resumenPerfilParaMostrar = null;
     let fraseDelDia = perfil.frase_fecha === hoy ? perfil.frase_del_dia : null;
 
-    if (!perfil.nombre && historial.length > 0) {
+    if (!perfil.nombre) {
       const nombreDetectado = await extraerNombre(mensaje);
       if (nombreDetectado) cambiosPerfil.nombre = nombreDetectado;
     } else {
