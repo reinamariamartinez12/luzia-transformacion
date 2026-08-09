@@ -218,7 +218,7 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
 
     const { error } = await client.auth.signInWithOtp({
       email: email,
-      options: { emailRedirectTo: window.location.href }
+      options: { emailRedirectTo: 'https://luzia-acompanamiento-emocional.netlify.app/mi-luzia.html' }
     });
 
     btnSend.disabled = false;
