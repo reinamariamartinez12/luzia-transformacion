@@ -258,6 +258,75 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
     font-size:11px; opacity:.45; text-align:center; margin-top:10px;
   }
 
+  /* ---------- Rail izquierda (frase del dia / tu proceso) ---------- */
+  .rail-izquierda{
+    position:fixed;
+    left:14px;
+    top:50%;
+    transform:translateY(-50%);
+    z-index:15;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .btn-rail{
+    width:50px; height:50px;
+    border-radius:50%;
+    background:var(--surface);
+    border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    box-shadow:0 6px 16px rgba(0,0,0,.18);
+    transition:transform .15s ease, border-color .2s, background .2s;
+    animation:aparecer .3s ease;
+  }
+  .btn-rail svg{width:22px; height:22px; stroke:var(--gold-2); fill:none;}
+  .btn-rail:active{transform:scale(.88);}
+  .btn-rail:hover, .btn-rail:focus-visible{border-color:var(--gold); background:var(--surface-2);}
+  .btn-rail img{width:100%; height:100%; border-radius:50%; object-fit:cover;}
+
+  /* ---------- Panel (hoja inferior) ---------- */
+  .panel-overlay{
+    position:fixed; inset:0; z-index:40;
+    background:rgba(20,15,18,.6);
+    display:flex; align-items:flex-end;
+    opacity:0; pointer-events:none;
+    transition:opacity .25s ease;
+  }
+  .panel-overlay.abierto{opacity:1; pointer-events:auto;}
+  .panel{
+    background:var(--night);
+    border-top:1px solid var(--line);
+    border-radius:24px 24px 0 0;
+    width:100%;
+    max-height:75vh;
+    display:flex;
+    flex-direction:column;
+    transform:translateY(100%);
+    transition:transform .3s ease;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  .panel-overlay.abierto .panel{transform:translateY(0);}
+  .panel-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .panel-header h3{font-size:19px; font-weight:600;}
+  .panel-cerrar{
+    background:none; border:none; color:var(--text); opacity:.6;
+    font-size:22px; line-height:1; cursor:pointer; padding:4px 8px;
+  }
+  .panel-lista{overflow-y:auto; display:flex; flex-direction:column; gap:14px;}
+  .panel-item{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:14px 16px;
+  }
+  .panel-item .fecha{
+    display:block; font-size:11.5px; color:var(--gold-2); opacity:.85;
+    text-transform:capitalize; margin-bottom:6px;
+  }
+  .panel-item .texto{font-size:14.5px; line-height:1.5;}
+  .panel-vacio{opacity:.6; font-size:14px; text-align:center; padding:30px 10px;}
+
   .wa-float{
     position:fixed; bottom:22px; right:22px;
     background:#25D366; color:#fff;
@@ -282,6 +351,35 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
   </div>
   <button class="btn-salir" id="btn-salir" type="button">Salir</button>
 </header>
+
+<div class="rail-izquierda">
+  <button class="btn-rail" id="btn-frases" type="button" aria-label="Tu frase de hoy">
+    <svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3 3 3 6 0 9-3-3-3-6 0-9Z"/><path d="M12 12c3 3 3 6 0 9-3-3-3-6 0-9Z"/></svg>
+  </button>
+  <button class="btn-rail" id="btn-proceso" type="button" aria-label="Tu proceso">
+    <svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20c4-6 6-9 5-14"/><path d="M9 9c2 0 3-1 3-3"/><path d="M20 4c-4 6-6 9-5 14"/><path d="M15 15c-2 0-3 1-3 3"/></svg>
+  </button>
+</div>
+
+<div class="panel-overlay" id="overlay-frases">
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Tu frase de hoy</h3>
+      <button class="panel-cerrar" type="button" data-cerrar="overlay-frases" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="panel-lista" id="lista-frases"></div>
+  </div>
+</div>
+
+<div class="panel-overlay" id="overlay-proceso">
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Tu proceso</h3>
+      <button class="panel-cerrar" type="button" data-cerrar="overlay-proceso" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="panel-lista" id="lista-proceso"></div>
+  </div>
+</div>
 
 <main id="chat-main">
   <p class="estado-carga" id="estado-carga">Abriendo tu espacio con Luzia…</p>
@@ -310,6 +408,65 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
   const inputMensaje = document.getElementById('input-mensaje');
   const btnEnviar = document.getElementById('btn-enviar');
   const btnSalir = document.getElementById('btn-salir');
+
+  function formatearFecha(fechaISO){
+    const d = new Date(fechaISO + (fechaISO.length <= 10 ? 'T12:00:00' : ''));
+    return d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  function abrirPanel(id){
+    document.getElementById(id).classList.add('abierto');
+  }
+  function cerrarPanel(id){
+    document.getElementById(id).classList.remove('abierto');
+  }
+  document.querySelectorAll('[data-cerrar]').forEach((btn) => {
+    btn.addEventListener('click', () => cerrarPanel(btn.getAttribute('data-cerrar')));
+  });
+  document.querySelectorAll('.panel-overlay').forEach((overlay) => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.classList.remove('abierto');
+    });
+  });
+
+  async function cargarHistorialPanel(tabla, columnaTexto, listaId, mensajeVacio){
+    const lista = document.getElementById(listaId);
+    lista.innerHTML = '<p class="panel-vacio">Cargando…</p>';
+    const { data: { session: fresca } } = await client.auth.getSession();
+    const token = fresca ? fresca.access_token : session.access_token;
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${tabla}?select=${columnaTexto},created_at&order=created_at.desc&limit=30`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` } }
+    );
+    const data = await res.json().catch(() => []);
+    lista.innerHTML = '';
+    if (!Array.isArray(data) || data.length === 0) {
+      lista.innerHTML = `<p class="panel-vacio">${mensajeVacio}</p>`;
+      return;
+    }
+    data.forEach((item) => {
+      const div = document.createElement('div');
+      div.className = 'panel-item';
+      const fecha = document.createElement('span');
+      fecha.className = 'fecha';
+      fecha.textContent = formatearFecha(item.created_at);
+      const texto = document.createElement('div');
+      texto.className = 'texto';
+      texto.textContent = item[columnaTexto];
+      div.appendChild(fecha);
+      div.appendChild(texto);
+      lista.appendChild(div);
+    });
+  }
+
+  document.getElementById('btn-frases').addEventListener('click', () => {
+    abrirPanel('overlay-frases');
+    cargarHistorialPanel('luzia_frases_dia', 'frase', 'lista-frases', 'Todavía no tienes frases guardadas — vuelve mañana.');
+  });
+  document.getElementById('btn-proceso').addEventListener('click', () => {
+    abrirPanel('overlay-proceso');
+    cargarHistorialPanel('luzia_resumenes_perfil', 'resumen', 'lista-proceso', 'Tu primer resumen aparece después de tu primera semana hablando con Luzia.');
+  });
 
   const SUGERENCIAS = [
     "Solo necesito hablar con alguien… hoy no me siento bien",

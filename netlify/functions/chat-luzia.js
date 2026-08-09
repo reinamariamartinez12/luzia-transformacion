@@ -19,7 +19,7 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const MENSAJES_DE_CONTEXTO = 20; // cuantos mensajes previos se mandan a la IA como memoria reciente
 const MAX_CARACTERES_MENSAJE = 4000;
 const UMBRAL_ACTUALIZAR_MEMORIA = 20; // cada cuantos mensajes nuevos se refresca memoria_resumen
-const CICLOS_ENTRE_RESUMEN_PERFIL = 3; // cada cuantas actualizaciones de memoria se le muestra el resumen a la usuaria
+const DIAS_ENTRE_RESUMEN_PERFIL = 7; // cada cuantos dias se le muestra el resumen de perfil a la usuaria
 
 const SYSTEM_PROMPT_BASE = `Eres Luzia. Un espacio emocional donde la usuaria puede decir lo que siente sin quedarse sola con eso. Escuchas, entiendes, acompañas y guías con claridad emocional y acciones prácticas para volver a ella misma. No eres solo conversación: eres acompañamiento real, humano y progresivo. No reemplazas terapia.
 
@@ -160,7 +160,7 @@ async function obtenerUsuarioDesdeToken(userToken) {
 }
 
 async function obtenerPerfil(email, userToken) {
-  const campos = 'estado,nombre,racha_dias,ultima_interaccion,memoria_resumen,mensajes_desde_resumen,resumen_actualizaciones,ultimo_resumen_mostrado,frase_del_dia,frase_fecha';
+  const campos = 'estado,nombre,racha_dias,ultima_interaccion,memoria_resumen,mensajes_desde_resumen,resumen_perfil_fecha,frase_del_dia,frase_fecha';
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/luzia_subscribers?email=eq.${encodeURIComponent(email)}&select=${campos}`,
     { headers: supabaseHeaders(userToken) }
@@ -197,6 +197,22 @@ async function guardarIntercambio(email, mensajeUsuaria, mensajeLuzia, userToken
       { email, rol: 'usuaria', contenido: mensajeUsuaria },
       { email, rol: 'luzia', contenido: mensajeLuzia }
     ])
+  });
+}
+
+async function guardarFraseDelDia(email, frase, fecha) {
+  await fetch(`${SUPABASE_URL}/rest/v1/luzia_frases_dia`, {
+    method: 'POST',
+    headers: supabaseHeadersService({ Prefer: 'return=minimal' }),
+    body: JSON.stringify([{ email, frase, fecha }])
+  });
+}
+
+async function guardarResumenPerfil(email, resumen) {
+  await fetch(`${SUPABASE_URL}/rest/v1/luzia_resumenes_perfil`, {
+    method: 'POST',
+    headers: supabaseHeadersService({ Prefer: 'return=minimal' }),
+    body: JSON.stringify([{ email, resumen }])
   });
 }
 
@@ -387,17 +403,6 @@ exports.handler = async (event) => {
         const nuevaMemoria = await actualizarMemoria(perfil.memoria_resumen, transcripcion);
         cambiosPerfil.memoria_resumen = nuevaMemoria;
         cambiosPerfil.mensajes_desde_resumen = 0;
-
-        const nuevasActualizaciones = (perfil.resumen_actualizaciones || 0) + 1;
-        cambiosPerfil.resumen_actualizaciones = nuevasActualizaciones;
-
-        if (nuevasActualizaciones - (perfil.ultimo_resumen_mostrado || 0) >= CICLOS_ENTRE_RESUMEN_PERFIL) {
-          const positivo = await generarResumenPositivo(nuevaMemoria);
-          if (positivo) {
-            resumenPerfilParaMostrar = positivo;
-            cambiosPerfil.ultimo_resumen_mostrado = nuevasActualizaciones;
-          }
-        }
       } else {
         cambiosPerfil.mensajes_desde_resumen = totalNuevos;
 
@@ -407,6 +412,23 @@ exports.handler = async (event) => {
             cambiosPerfil.frase_del_dia = nuevaFrase;
             cambiosPerfil.frase_fecha = hoy;
             fraseDelDia = nuevaFrase;
+            await guardarFraseDelDia(usuario.email, nuevaFrase, hoy);
+          }
+        }
+      }
+
+      const memoriaDisponible = cambiosPerfil.memoria_resumen || perfil.memoria_resumen;
+      if (memoriaDisponible) {
+        const diasDesdeResumen = perfil.resumen_perfil_fecha
+          ? Math.floor((new Date(hoy) - new Date(perfil.resumen_perfil_fecha)) / 86400000)
+          : Infinity;
+
+        if (diasDesdeResumen >= DIAS_ENTRE_RESUMEN_PERFIL) {
+          const positivo = await generarResumenPositivo(memoriaDisponible);
+          if (positivo) {
+            resumenPerfilParaMostrar = positivo;
+            cambiosPerfil.resumen_perfil_fecha = hoy;
+            await guardarResumenPerfil(usuario.email, positivo);
           }
         }
       }
