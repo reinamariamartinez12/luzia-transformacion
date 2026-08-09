@@ -307,6 +307,14 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
     padding:20px 20px calc(20px + env(safe-area-inset-bottom));
   }
   .panel-overlay.abierto .panel{transform:translateY(0);}
+  .panel-ilustracion{
+    width:120px; height:120px;
+    border-radius:50%;
+    object-fit:cover;
+    margin:0 auto 14px;
+    display:block;
+    box-shadow:0 10px 24px rgba(176,141,87,.25);
+  }
   .panel-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
   .panel-header h3{font-size:19px; font-weight:600;}
   .panel-cerrar{
@@ -354,15 +362,16 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
 
 <div class="rail-izquierda">
   <button class="btn-rail" id="btn-frases" type="button" aria-label="Tu frase de hoy">
-    <svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3 3 3 6 0 9-3-3-3-6 0-9Z"/><path d="M12 12c3 3 3 6 0 9-3-3-3-6 0-9Z"/></svg>
+    <img src="assets/icono-frase-del-dia.png" alt="">
   </button>
   <button class="btn-rail" id="btn-proceso" type="button" aria-label="Tu proceso">
-    <svg viewBox="0 0 24 24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20c4-6 6-9 5-14"/><path d="M9 9c2 0 3-1 3-3"/><path d="M20 4c-4 6-6 9-5 14"/><path d="M15 15c-2 0-3 1-3 3"/></svg>
+    <img src="assets/icono-tu-proceso.png" alt="">
   </button>
 </div>
 
 <div class="panel-overlay" id="overlay-frases">
   <div class="panel">
+    <img class="panel-ilustracion" src="assets/header-frase-del-dia.png" alt="Tu regalo del día">
     <div class="panel-header">
       <h3>Tu frase de hoy</h3>
       <button class="panel-cerrar" type="button" data-cerrar="overlay-frases" aria-label="Cerrar">✕</button>
@@ -373,6 +382,7 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
 
 <div class="panel-overlay" id="overlay-proceso">
   <div class="panel">
+    <img class="panel-ilustracion" src="assets/header-tu-proceso.png" alt="Tu proceso">
     <div class="panel-header">
       <h3>Tu proceso</h3>
       <button class="panel-cerrar" type="button" data-cerrar="overlay-proceso" aria-label="Cerrar">✕</button>
