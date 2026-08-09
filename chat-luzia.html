@@ -61,11 +61,10 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
     background:rgba(42,33,40,.92);
     backdrop-filter:blur(8px);
     border-bottom:1px solid var(--line);
-    padding-top:14px;
   }
   .header-top{
     display:flex; align-items:center; gap:12px;
-    padding:0 18px 14px;
+    padding:14px 18px;
   }
   header .logo{
     width:38px; height:38px; border-radius:50%;
@@ -261,31 +260,33 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
     font-size:11px; opacity:.45; text-align:center; margin-top:10px;
   }
 
-  /* ---------- Tarjetas superiores (frase del dia / tu proceso) ---------- */
-  .tarjetas-superiores{
+  /* ---------- Tarjetas flotantes (frase del dia / tu proceso) ---------- */
+  .tarjetas-flotantes{
+    position:fixed;
+    top:84px;
+    left:14px;
+    z-index:15;
     display:flex;
-    gap:10px;
-    padding:0 18px 14px;
-    overflow-x:auto;
-    scrollbar-width:none;
+    flex-direction:column;
+    gap:12px;
   }
-  .tarjetas-superiores::-webkit-scrollbar{display:none;}
   .tarjeta-btn{
     display:flex;
     align-items:center;
-    gap:9px;
-    flex-shrink:0;
+    gap:11px;
     background:var(--surface);
     border:1px solid var(--line);
     border-radius:100px;
-    padding:8px 16px 8px 8px;
+    padding:9px 20px 9px 9px;
     cursor:pointer;
+    box-shadow:0 8px 20px rgba(0,0,0,.22);
     transition:transform .15s ease, border-color .2s, background .2s;
+    animation:aparecer .3s ease;
   }
-  .tarjeta-btn:active{transform:scale(.96);}
+  .tarjeta-btn:active{transform:scale(.95);}
   .tarjeta-btn:hover, .tarjeta-btn:focus-visible{border-color:var(--gold); background:var(--surface-2);}
-  .tarjeta-btn img{width:34px; height:34px; border-radius:50%; object-fit:cover; flex-shrink:0;}
-  .tarjeta-btn span{font-size:13px; color:var(--text); font-weight:500; white-space:nowrap;}
+  .tarjeta-btn img{width:44px; height:44px; border-radius:50%; object-fit:cover; flex-shrink:0;}
+  .tarjeta-btn span{font-size:14px; color:var(--text); font-weight:500; white-space:nowrap;}
 
   /* ---------- Panel (hoja inferior) ---------- */
   .panel-overlay{
@@ -362,17 +363,18 @@ src="https://www.facebook.com/tr?id=767542639288249&ev=PageView&noscript=1"
     </div>
     <button class="btn-salir" id="btn-salir" type="button">Salir</button>
   </div>
-  <div class="tarjetas-superiores">
-    <button class="tarjeta-btn" id="btn-frases" type="button">
-      <img src="assets/icono-frase-del-dia.png" alt="">
-      <span>Tu frase de hoy</span>
-    </button>
-    <button class="tarjeta-btn" id="btn-proceso" type="button">
-      <img src="assets/icono-tu-proceso.png" alt="">
-      <span>Tu proceso</span>
-    </button>
-  </div>
 </header>
+
+<div class="tarjetas-flotantes">
+  <button class="tarjeta-btn" id="btn-frases" type="button">
+    <img src="assets/icono-frase-del-dia.png" alt="">
+    <span>Tu frase de hoy</span>
+  </button>
+  <button class="tarjeta-btn" id="btn-proceso" type="button">
+    <img src="assets/icono-tu-proceso.png" alt="">
+    <span>Tu proceso</span>
+  </button>
+</div>
 
 <div class="panel-overlay" id="overlay-frases">
   <div class="panel">
