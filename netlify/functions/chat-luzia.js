@@ -295,15 +295,16 @@ async function actualizarMemoria(memoriaActual, mensajesTranscripcion) {
   }
 }
 
-async function generarResumenPositivo(memoria) {
+async function generarResumenPositivo(memoria, nombre) {
   try {
+    const comoLlamarla = nombre ? `Se llama ${nombre}, puedes usar su nombre con naturalidad (sin abusar).` : 'Todavía no sabes su nombre, no lo inventes.';
     return await llamarOpenAI(
       [
         {
           role: 'system',
-          content: 'Escribes, en segunda persona y en tono calido (como Luzia), un resumen breve (3-4 frases) del proceso de una usuaria basado en el resumen de memoria que te paso. SIEMPRE en positivo: que le gusta, que ha superado, como ha avanzado. Nunca menciones lo que le falta, lo que sigue mal, ni des consejos nuevos. Es un regalo de reconocimiento, no un diagnostico.'
+          content: `Escribes, en segunda persona y en tono calido (como Luzia), un resumen breve (3-4 frases) del proceso de una usuaria basado en el resumen de memoria que te paso. ${comoLlamarla} SIEMPRE en positivo: que le gusta, que ha superado, como ha avanzado. Nunca menciones lo que le falta, lo que sigue mal, ni des consejos nuevos. Es un regalo de reconocimiento, no un diagnostico. Si el resumen de memoria todavia esta vacio o es muy corto, escribe algo calido y general sobre el valor de elegirse y escucharse, sin inventar detalles que no te dieron.`
         },
-        { role: 'user', content: memoria || '' }
+        { role: 'user', content: memoria || '(todavia no hay suficiente historia)' }
       ],
       { temperature: 0.8, max_tokens: 200 }
     );
@@ -312,17 +313,18 @@ async function generarResumenPositivo(memoria) {
   }
 }
 
-async function generarFraseDelDia(memoria, mensajesRecientes) {
+async function generarFraseDelDia(memoria, mensajesRecientes, nombre) {
   try {
     const contexto = mensajesRecientes
       .slice(-6)
       .map((m) => `${m.rol === 'usuaria' ? 'Usuaria' : 'Luzia'}: ${m.contenido}`)
       .join('\n');
+    const comoLlamarla = nombre ? `Se llama ${nombre}, puedes nombrarla si encaja natural (sin abusar).` : 'Todavía no sabes su nombre, no lo inventes.';
     return await llamarOpenAI(
       [
         {
           role: 'system',
-          content: 'Escribes una sola frase corta (maximo 20 palabras), calida y especifica -no generica de banco de frases- como si Luzia se la regalara a esta usuaria en particular hoy, basada en como se ha sentido segun el contexto. Sin comillas, sin firma, solo la frase.'
+          content: `Escribes una sola frase corta (maximo 20 palabras), calida y especifica -no generica de banco de frases- como si Luzia se la regalara a esta usuaria en particular hoy, basada en como se ha sentido segun el contexto. ${comoLlamarla} Si todavia no hay suficiente contexto (es de las primeras veces que habla con Luzia), escribe una frase calida sobre amor propio o autoestima, igual de especifica y sentida, nunca generica de calendario. Sin comillas, sin firma, solo la frase.`
         },
         {
           role: 'user',
@@ -395,41 +397,42 @@ exports.handler = async (event) => {
     if (!perfil.nombre) {
       const nombreDetectado = await extraerNombre(mensaje);
       if (nombreDetectado) cambiosPerfil.nombre = nombreDetectado;
+    }
+    const nombreActual = cambiosPerfil.nombre || perfil.nombre || null;
+
+    const totalNuevos = (perfil.mensajes_desde_resumen || 0) + 2;
+
+    if (totalNuevos >= UMBRAL_ACTUALIZAR_MEMORIA) {
+      const transcripcion = [...historial, { rol: 'usuaria', contenido: mensaje }, { rol: 'luzia', contenido: respuestaLuzia }];
+      const nuevaMemoria = await actualizarMemoria(perfil.memoria_resumen, transcripcion);
+      cambiosPerfil.memoria_resumen = nuevaMemoria;
+      cambiosPerfil.mensajes_desde_resumen = 0;
     } else {
-      const totalNuevos = (perfil.mensajes_desde_resumen || 0) + 2;
+      cambiosPerfil.mensajes_desde_resumen = totalNuevos;
+    }
 
-      if (totalNuevos >= UMBRAL_ACTUALIZAR_MEMORIA) {
-        const transcripcion = [...historial, { rol: 'usuaria', contenido: mensaje }, { rol: 'luzia', contenido: respuestaLuzia }];
-        const nuevaMemoria = await actualizarMemoria(perfil.memoria_resumen, transcripcion);
-        cambiosPerfil.memoria_resumen = nuevaMemoria;
-        cambiosPerfil.mensajes_desde_resumen = 0;
-      } else {
-        cambiosPerfil.mensajes_desde_resumen = totalNuevos;
-
-        if (perfil.frase_fecha !== hoy) {
-          const nuevaFrase = await generarFraseDelDia(perfil.memoria_resumen, historial);
-          if (nuevaFrase) {
-            cambiosPerfil.frase_del_dia = nuevaFrase;
-            cambiosPerfil.frase_fecha = hoy;
-            fraseDelDia = nuevaFrase;
-            await guardarFraseDelDia(usuario.email, nuevaFrase, hoy);
-          }
-        }
+    if (perfil.frase_fecha !== hoy) {
+      const nuevaFrase = await generarFraseDelDia(perfil.memoria_resumen, historial, nombreActual);
+      if (nuevaFrase) {
+        cambiosPerfil.frase_del_dia = nuevaFrase;
+        cambiosPerfil.frase_fecha = hoy;
+        fraseDelDia = nuevaFrase;
+        await guardarFraseDelDia(usuario.email, nuevaFrase, hoy);
       }
+    }
 
-      const memoriaDisponible = cambiosPerfil.memoria_resumen || perfil.memoria_resumen;
-      if (memoriaDisponible) {
-        const diasDesdeResumen = perfil.resumen_perfil_fecha
-          ? Math.floor((new Date(hoy) - new Date(perfil.resumen_perfil_fecha)) / 86400000)
-          : Infinity;
+    const memoriaDisponible = cambiosPerfil.memoria_resumen || perfil.memoria_resumen;
+    if (memoriaDisponible) {
+      const diasDesdeResumen = perfil.resumen_perfil_fecha
+        ? Math.floor((new Date(hoy) - new Date(perfil.resumen_perfil_fecha)) / 86400000)
+        : Infinity;
 
-        if (diasDesdeResumen >= DIAS_ENTRE_RESUMEN_PERFIL) {
-          const positivo = await generarResumenPositivo(memoriaDisponible);
-          if (positivo) {
-            resumenPerfilParaMostrar = positivo;
-            cambiosPerfil.resumen_perfil_fecha = hoy;
-            await guardarResumenPerfil(usuario.email, positivo);
-          }
+      if (diasDesdeResumen >= DIAS_ENTRE_RESUMEN_PERFIL) {
+        const positivo = await generarResumenPositivo(memoriaDisponible, nombreActual);
+        if (positivo) {
+          resumenPerfilParaMostrar = positivo;
+          cambiosPerfil.resumen_perfil_fecha = hoy;
+          await guardarResumenPerfil(usuario.email, positivo);
         }
       }
     }
